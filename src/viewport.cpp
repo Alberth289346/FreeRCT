@@ -16,6 +16,7 @@
 #include "math_func.h"
 #include "viewport.h"
 #include "map.h"
+#include "mouse_mode.h"
 #include "video.h"
 #include "palette.h"
 #include "sprite_store.h"
@@ -260,8 +261,11 @@ public:
 	SpriteCollector(Viewport *vp, bool enable_cursors);
 	~SpriteCollector();
 
-	DrawImages draw_images; ///< Sprites to draw ordered by viewing distance.
-	bool enable_cursors;    ///< Enable cursor drawing.
+	void SetSelector(MouseModeSelector *selector);
+
+	DrawImages draw_images;      ///< Sprites to draw ordered by viewing distance.
+	MouseModeSelector *selector; ///< Mouse mode selector.
+	bool enable_cursors;         ///< Enable cursor drawing.
 
 protected:
 	void CollectVoxel(const Voxel *vx, const XYZPoint16 &voxel_pos, int32 xnorth, int32 ynorth) override;
@@ -444,6 +448,15 @@ SpriteCollector::SpriteCollector(Viewport *vp, bool enable_cursors) : VoxelColle
 
 SpriteCollector::~SpriteCollector()
 {
+}
+
+/**
+ * Set the mouse mode selector.
+ * @param selector Selector to use while rendering.
+ */
+void SpriteCollector::SetSelector(MouseModeSelector *selector)
+{
+	this->selector = selector;
 }
 
 /**
@@ -740,9 +753,10 @@ uint8 Viewport::GetMaxCursorHeight(uint16 xpos, uint16 ypos, uint8 zpos)
 const ImageData *SpriteCollector::GetCursorSpriteAtPos(const XYZPoint16 &voxel_pos, uint8 tslope, uint8 &yoffset)
 {
 	yoffset = 0;
-	if (!this->enable_cursors) return nullptr;
 
-	CursorType ctype = this->vp->GetCursorAtPos(voxel_pos);
+	CursorType ctype = CUR_TYPE_INVALID;
+	if (this->enable_cursors) ctype = this->vp->GetCursorAtPos(voxel_pos);
+	if (ctype == CUR_TYPE_INVALID && this->selector != nullptr && this->selector->IsInsideArea(voxel_pos.x, voxel_pos.y)) ctype = this->selector->GetCursor(voxel_pos);
 	switch (ctype) {
 		case CUR_TYPE_NORTH:
 		case CUR_TYPE_EAST:
@@ -764,14 +778,9 @@ const ImageData *SpriteCollector::GetCursorSpriteAtPos(const XYZPoint16 &voxel_p
 		case CUR_TYPE_EDGE_NE:
 		case CUR_TYPE_EDGE_SE:
 		case CUR_TYPE_EDGE_SW:
-		case CUR_TYPE_EDGE_NW: {
-			Viewport *vp = GetViewport();
-			if (vp != nullptr) {
-				yoffset = vp->edge_cursor.yoffset;
-				return vp->edge_cursor.sprite;
-			}
-			return nullptr;
-		}
+		case CUR_TYPE_EDGE_NW:
+			yoffset = this->vp->edge_cursor.yoffset;
+			return this->vp->edge_cursor.sprite;
 
 		default:
 			return nullptr;
@@ -1364,10 +1373,11 @@ int32 Viewport::ComputeY(int32 xpos, int32 ypos, int32 zpos)
 	return ComputeYFunction(xpos, ypos, zpos, this->orientation, this->tile_width, this->tile_height);
 }
 
-void Viewport::OnDraw()
+void Viewport::OnDraw(MouseModeSelector *selector)
 {
 	SpriteCollector collector(this, _mouse_modes.current->EnableCursors());
 	collector.SetWindowSize(-(int16)this->rect.width / 2, -(int16)this->rect.height / 2, this->rect.width, this->rect.height);
+	collector.SetSelector(selector);
 	collector.Collect(this->additions_enabled && this->additions_displayed);
 	static const Recolouring recolour;
 

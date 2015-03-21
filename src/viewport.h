@@ -198,7 +198,7 @@ public:
 	~Viewport();
 
 	void MarkVoxelDirty(const XYZPoint16 &voxel_pos, int16 height = 0);
-	void OnDraw() override;
+	void OnDraw(MouseModeSelector *selector) override;
 
 	void Rotate(int direction);
 	void MoveViewport(int dx, int dy);
