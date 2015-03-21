@@ -15,6 +15,8 @@ class MouseModeSelector {
 public:
 	MouseModeSelector();
 	virtual ~MouseModeSelector();
+
+	virtual void MarkDirty();
 };
 
 #endif

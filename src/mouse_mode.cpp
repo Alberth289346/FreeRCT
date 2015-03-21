@@ -17,3 +17,8 @@ MouseModeSelector::MouseModeSelector()
 MouseModeSelector::~MouseModeSelector()
 {
 }
+
+/** The voxels changed by the selector should be redrawn. */
+void MouseModeSelector::MarkDirty()
+{
+}
