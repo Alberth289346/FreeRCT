@@ -492,6 +492,10 @@ void GuiWindow::OnMouseLeaveEvent()
 	this->mouse_pos.y = -1;
 }
 
+void GuiWindow::SelectorMouseMoveEvent(Viewport *vp, const Point16 &pos) { }
+void GuiWindow::SelectorMouseButtonEvent(uint8 state) { }
+void GuiWindow::SelectorMouseWheelEvent(int direction) { }
+
 /**
  * A click with the left button at a widget has been detected.
  * @param widget %Widget number.

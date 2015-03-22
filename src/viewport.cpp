@@ -1583,17 +1583,20 @@ void Viewport::OnMouseMoveEvent(const Point16 &pos)
 	Point16 old_mouse_pos = this->mouse_pos;
 	this->mouse_pos = pos;
 
+	if (_window_manager.SelectorMouseMoveEvent(this, pos)) return;
 	_mouse_modes.current->OnMouseMoveEvent(this, old_mouse_pos, pos);
 }
 
 WmMouseEvent Viewport::OnMouseButtonEvent(uint8 state)
 {
+	if (_window_manager.SelectorMouseButtonEvent(state)) return WMME_NONE;
 	_mouse_modes.current->OnMouseButtonEvent(this, state);
 	return WMME_NONE;
 }
 
 void Viewport::OnMouseWheelEvent(int direction)
 {
+	if (_window_manager.SelectorMouseWheelEvent(direction)) return;
 	_mouse_modes.current->OnMouseWheelEvent(this, direction);
 }
 
