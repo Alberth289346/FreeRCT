@@ -32,7 +32,7 @@ struct GroundData {
  * Map of voxels to ground modification data.
  * @ingroup map_group
  */
-typedef std::map<Point32, GroundData> GroundModificationMap;
+typedef std::map<Point16, GroundData> GroundModificationMap;
 
 /**
  * Store and manage terrain changes.
@@ -41,69 +41,25 @@ typedef std::map<Point32, GroundData> GroundModificationMap;
  */
 class TerrainChanges {
 public:
-	TerrainChanges(const Point32 &base, uint16 xsize, uint16 ysize);
+	TerrainChanges(const Point16 &base, uint16 xsize, uint16 ysize);
 	~TerrainChanges();
 
-	void UpdatelevellingHeight(const Point32 &pos, int direction, uint8 *height);
-	bool ChangeVoxel(const Point32 &pos, uint8 height, int direction);
-	bool ChangeCorner(const Point32 &pos, TileCorner corner, int direction);
+	void UpdatelevellingHeight(const Point16 &pos, int direction, uint8 *height);
+	bool ChangeVoxel(const Point16 &pos, uint8 height, int direction);
+	bool ChangeCorner(const Point16 &pos, TileCorner corner, int direction);
 	bool ModifyWorld(int direction);
 
 	GroundModificationMap changes; ///< Registered changes.
 
 private:
-	Point32 base; ///< Base position of the smooth changing world.
+	Point16 base; ///< Base position of the smooth changing world.
 	uint16 xsize; ///< Horizontal size of the smooth changing world.
 	uint16 ysize; ///< Vertical size of the smooth changing world.
 
-	GroundData *GetGroundData(const Point32 &pos);
+	GroundData *GetGroundData(const Point16 &pos);
 };
 
-/** State of the terraform coordinator. */
-enum TerraformerState {
-	TFS_OFF,      ///< %Window closed.
-	TFS_NO_MOUSE, ///< %Window opened, but no mouse mode active.
-	TFS_ON,       ///< Active.
-};
-
-/**
- * Tile terraforming mouse mode.
- *
- * Terraforms an area of the world.
- * It has two modes, a non-zero size, meaning terraforming is limited to that area, or a zero-size (aka 'dot mode'),
- * which means 'unlimited' (the entire world may get changed, if money (and world contents) permits.
- *
- * The \c true 'levelling' setting means that the lowest parts are raised or the highest parts are lowered.
- * A \c false 'levelling' value means that the entire area is moved up or down.
- */
-class TileTerraformMouseMode: public MouseMode {
-public:
-	TerraformerState state; ///< Own state.
-	uint8 mouse_state; ///< Last known state of the mouse.
-	uint8 xsize;       ///< Horizontal size of the terraform area. May be \c 0, which means 'dot'.
-	uint8 ysize;       ///< Vertical size of the terraform area. May be \c 0, which means 'dot'.
-	signed char pixel_counter; ///< Vertical mouse movement counter for LMB up/down terraforming.
-	bool levelling;    ///< For non-zero areas, \c true means 'level the area', and \c false means 'keep area as-is'.
-
-	TileTerraformMouseMode();
-
-	void OpenWindow();
-	void CloseWindow();
-	void SetSize(int xsize, int ysize);
-	void Setlevelling(bool level);
-
-	void SetCursors();
-
-	bool MayActivateMode() override;
-	void ActivateMode(const Point16 &pos) override;
-	void LeaveMode() override;
-	bool EnableCursors() override;
-
-	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) override;
-	void OnMouseButtonEvent(Viewport *vp, uint8 state) override;
-	void OnMouseWheelEvent(Viewport *vp, int direction) override;
-};
-
-extern TileTerraformMouseMode _terraformer;
+void ChangeTileCursorMode(const Point16 &voxel_pos, CursorType ctype, Viewport *vp, bool levelling, int direction, bool dot_mode);
+void ChangeAreaCursorMode(const Rectangle16 &area, Viewport *vp, bool levelling, int direction);
 
 #endif
