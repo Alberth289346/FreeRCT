@@ -604,13 +604,13 @@ void ChangeTileCursorMode(const Point16 &voxel_pos, CursorType ctype, Viewport *
 		w = _world.GetXSize();
 		h = _world.GetYSize();
 	} else { // Single tile mode.
-		p = {voxel_pos.x, voxel_pos.y};
+		p = voxel_pos;
 		w = 1;
 		h = 1;
 	}
 	TerrainChanges changes(p, w, h);
 
-	p = {voxel_pos.x, voxel_pos.y};
+	p = voxel_pos;
 
 	bool ok;
 	switch (ctype) {
