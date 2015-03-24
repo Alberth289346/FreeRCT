@@ -35,6 +35,7 @@ void MouseModeSelector::MarkDirty()
 
 CursorMouseMode::CursorMouseMode() : MouseModeSelector()
 {
+	this->cur_cursor = CUR_TYPE_TILE; // Use a visible cursor by default.
 }
 
 CursorMouseMode::~CursorMouseMode()
@@ -110,7 +111,7 @@ CursorType CursorMouseMode::GetCursor(const XYZPoint16 &voxel_pos)
 	if (y < 0 || y >= this->area.height) return CUR_TYPE_INVALID;
 
 	TileData &td = this->GetTileData(x, y);
-	if (td.enabled && GetTopGroundHeight(td, voxel_pos.x, voxel_pos.y) == voxel_pos.z) return CUR_TYPE_TILE;
+	if (td.enabled && GetTopGroundHeight(td, voxel_pos.x, voxel_pos.y) == voxel_pos.z) return this->cur_cursor;
 	return CUR_TYPE_INVALID;
 }
 

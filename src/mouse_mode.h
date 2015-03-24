@@ -87,6 +87,7 @@ public:
 	}
 
 	std::vector<TileData> ground_height; ///< Height of the ground within the area, negative means 'unknown'.
+	CursorType cur_cursor;               ///< Cursor to return at the #GetCursor call.
 };
 
 #endif
