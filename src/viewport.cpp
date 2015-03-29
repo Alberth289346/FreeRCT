@@ -162,6 +162,7 @@ public:
 	void SetWindowSize(int16 xpos, int16 ypos, uint16 width, uint16 height);
 
 	void Collect(bool use_additions);
+	void SetSelector(MouseModeSelector *selector);
 
 	/**
 	 * Convert 3D position to the horizontal 2D position.
@@ -192,6 +193,7 @@ public:
 	ViewOrientation orient;       ///< Direction of view.
 	const SpriteStorage *sprites; ///< Sprite collection of the right size.
 	Viewport *vp;                 ///< Parent viewport for accessing the cursors if not \c nullptr.
+	MouseModeSelector *selector;  ///< Mouse mode selector.
 	bool draw_above_stack;        ///< Also draw voxels above the voxel stack (for cursors).
 	bool underground_mode;        ///< Whether to draw underground mode sprites (else draw normal surface sprites).
 
@@ -261,11 +263,8 @@ public:
 	SpriteCollector(Viewport *vp, bool enable_cursors);
 	~SpriteCollector();
 
-	void SetSelector(MouseModeSelector *selector);
-
-	DrawImages draw_images;      ///< Sprites to draw ordered by viewing distance.
-	MouseModeSelector *selector; ///< Mouse mode selector.
-	bool enable_cursors;         ///< Enable cursor drawing.
+	DrawImages draw_images; ///< Sprites to draw ordered by viewing distance.
+	bool enable_cursors;    ///< Enable cursor drawing.
 
 protected:
 	void CollectVoxel(const Voxel *vx, const XYZPoint16 &voxel_pos, int32 xnorth, int32 ynorth) override;
@@ -307,6 +306,7 @@ protected:
 VoxelCollector::VoxelCollector(Viewport *vp, bool draw_above_stack)
 {
 	this->vp = vp;
+	this->selector = nullptr;
 	this->view_pos = vp->view_pos;
 	this->tile_width = vp->tile_width;
 	this->tile_height = vp->tile_height;
@@ -339,6 +339,15 @@ void VoxelCollector::SetWindowSize(int16 xpos, int16 ypos, uint16 width, uint16 
 }
 
 /**
+ * Set the mouse mode selector.
+ * @param selector Selector to use while rendering.
+ */
+void VoxelCollector::SetSelector(MouseModeSelector *selector)
+{
+	this->selector = selector;
+}
+
+/**
  * Perform the collecting cycle.
  * This part walks over the voxels, and call #CollectVoxel for each useful voxel.
  * A derived class may then inspect the voxel in more detail.
@@ -356,25 +365,32 @@ void VoxelCollector::Collect(bool use_additions)
 			if (north_x - this->tile_width / 2 >= (int32)(this->rect.base.x + this->rect.width)) continue; // Left of the window.
 
 			const VoxelStack *stack = use_additions ? _additions.GetStack(xpos, ypos) : _world.GetStack(xpos, ypos);
-			this->SetupSupports(stack, xpos, ypos);
+
+			/* Compute lowest and highest voxel to render. */
 			uint zpos = stack->base;
-			for (int count = 0; count < stack->height; zpos++, count++) {
+			uint top = stack->base + stack->height - 1;
+
+			if (this->selector != nullptr) {
+				uint32 range = this->selector->GetRange(xpos, ypos);
+				if (range != 0) {
+					zpos = std::min(zpos, (range & 0xFFFF));
+					top = std::max(top, (range >> 16));
+				}
+			}
+			if (this->draw_above_stack) { // Possibly add cursor on top.
+				top = std::max(top, static_cast<uint>(this->vp->GetMaxCursorHeight(xpos, ypos, (top == 0) ? top : top - 1)));
+			}
+
+			this->SetupSupports(stack, xpos, ypos);
+
+			for (; zpos <= top; zpos++) {
 				int32 north_y = this->ComputeY(world_x, world_y, zpos * 256);
 				if (north_y - this->tile_height >= (int32)(this->rect.base.y + this->rect.height)) continue; // Voxel is below the window.
 				if (north_y + this->tile_width / 2 + this->tile_height <= (int32)this->rect.base.y) break; // Above the window and rising!
 
-				this->CollectVoxel(&stack->voxels[count], XYZPoint16(xpos, ypos, zpos), north_x, north_y);
-			}
-			/* Possibly cursors should be drawn above this. */
-			if (this->draw_above_stack) {
-				uint8 zmax = this->vp->GetMaxCursorHeight(xpos, ypos, (zpos == 0) ? zpos : zpos - 1);
-				for (; zpos <= zmax; zpos++) {
-					int32 north_y = this->ComputeY(world_x, world_y, zpos * 256);
-					if (north_y - this->tile_height >= (int32)(this->rect.base.y + this->rect.height)) continue; // Voxel is below the window.
-					if (north_y + this->tile_width / 2 + this->tile_height <= (int32)this->rect.base.y) break; // Above the window and rising!
-
-					this->CollectVoxel(nullptr, XYZPoint16(xpos, ypos, zpos), north_x, north_y);
-				}
+				int count = zpos - stack->base;
+				const Voxel *voxel = (count >= 0 && count < stack->height) ? &stack->voxels[count] : nullptr;
+				this->CollectVoxel(voxel, XYZPoint16(xpos, ypos, zpos), north_x, north_y);
 			}
 		}
 	}
@@ -448,15 +464,6 @@ SpriteCollector::SpriteCollector(Viewport *vp, bool enable_cursors) : VoxelColle
 
 SpriteCollector::~SpriteCollector()
 {
-}
-
-/**
- * Set the mouse mode selector.
- * @param selector Selector to use while rendering.
- */
-void SpriteCollector::SetSelector(MouseModeSelector *selector)
-{
-	this->selector = selector;
 }
 
 /**

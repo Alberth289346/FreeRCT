@@ -33,6 +33,15 @@ void MouseModeSelector::MarkDirty()
  * @return The cursor to use, or #CUR_TYPE_INVALID if no cursor should be displayed.
  */
 
+/**
+ * \fn MouseModeSelector::GetRange(uint xpos, uint ypos)
+ * Get the vertical range of voxels to render.
+ * @param xpos Horizontal position of the stack.
+ * @param ypos Vertical position of the stack.
+ * @return \c 0 if no interest in rendering in the stack, else lowest voxel
+ *         position in lower 16 bit, top voxel position in upper 16 bit.
+ */
+
 CursorMouseMode::CursorMouseMode() : MouseModeSelector()
 {
 	this->cur_cursor = CUR_TYPE_TILE; // Use a visible cursor by default.
@@ -113,6 +122,19 @@ CursorType CursorMouseMode::GetCursor(const XYZPoint16 &voxel_pos)
 	TileData &td = this->GetTileData(x, y);
 	if (td.enabled && GetTopGroundHeight(td, voxel_pos.x, voxel_pos.y) == voxel_pos.z) return this->cur_cursor;
 	return CUR_TYPE_INVALID;
+}
+
+uint32 CursorMouseMode::GetRange(uint xpos, uint ypos)
+{
+	int x = xpos - this->area.base.x;
+	if (x < 0 || x >= this->area.width) return 0;
+
+	int y = ypos - this->area.base.y;
+	if (y < 0 || y >= this->area.height) return 0;
+
+	TileData &td = this->GetTileData(x, y);
+	if (!td.enabled) return 0;
+	return td.height | (td.height << 16);
 }
 
 void CursorMouseMode::MarkDirty()

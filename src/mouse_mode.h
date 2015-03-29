@@ -42,6 +42,7 @@ public:
 
 	virtual void MarkDirty();
 	virtual CursorType GetCursor(const XYZPoint16 &voxel_pos) = 0;
+	virtual uint32 GetRange(uint xpos, uint ypos) = 0;
 
 	/**
 	 * Rough estimate whether the selector wants to render something in the voxel stack at the given coordinate.
@@ -70,6 +71,7 @@ public:
 
 	virtual void MarkDirty() override;
 	virtual CursorType GetCursor(const XYZPoint16 &voxel_pos) override;
+	virtual uint32 GetRange(uint xpos, uint ypos) override;
 
 	void SetSize(int xsize, int ysize);
 	void SetPosition(int xbase, int ybase);
