@@ -1668,6 +1668,6 @@ void InitMouseModes()
 	_mouse_modes.RegisterMode(&_path_builder);
 	_mouse_modes.RegisterMode(&_shop_placer);
 	_mouse_modes.RegisterMode(&_select_mousemode);
-	_mouse_modes.RegisterMode(&_coaster_builder);
+//	_mouse_modes.RegisterMode(&_coaster_builder);
 	_mouse_modes.RegisterMode(&_fence_builder);
 }

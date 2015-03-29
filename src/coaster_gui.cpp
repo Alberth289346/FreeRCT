@@ -18,7 +18,7 @@
 #include "map.h"
 #include "gui_sprites.h"
 
-CoasterBuildMode _coaster_builder; ///< Coaster build mouse mode handler.
+//XXX CoasterBuildMode _coaster_builder; ///< Coaster build mouse mode handler.
 
 /** Widget numbers of the roller coaster instance window. */
 enum CoasterInstanceWidgets {
@@ -95,6 +95,60 @@ void ShowCoasterManagementGui(RideInstance *coaster)
 		return;
 	}
 	ShowCoasterBuildGui(ci);
+}
+
+/** Mouse selector for building/selecting new track pieces. */
+class TrackPieceMouseMode : public CursorMouseMode {
+public:
+	TrackPieceMouseMode();
+	~TrackPieceMouseMode();
+
+	void SetTrackPiece(const XYZPoint16 &pos, ConstTrackPiecePtr &piece);
+
+	ConstTrackPiecePtr piece; ///< Piece to display, or \c nullptr if no piece to display.
+	XYZPoint16 piece_pos;     ///< Position of the track piece (may be different from the base of the cursor area).
+};
+
+TrackPieceMouseMode::TrackPieceMouseMode() : CursorMouseMode()
+{
+	this->piece = nullptr;
+}
+
+TrackPieceMouseMode::~TrackPieceMouseMode() { }
+
+/**
+ * Setup the mouse selector for displaying a track piece.
+ * @param pos Base position of the new track piece.
+ * @param piece Track piece to display.
+ */
+void TrackPieceMouseMode::SetTrackPiece(const XYZPoint16 &pos, ConstTrackPiecePtr &piece)
+{
+	if (this->piece != nullptr) this->MarkDirty(); // Mark current area.
+
+	this->piece = piece;
+	if (this->piece != nullptr) {
+		this->piece_pos = pos;
+
+		this->area = this->piece->GetArea();
+		this->area.base.x += pos.x; // Set new cursor area, origin may be different from piece_pos due to negative extent of a piece.
+		this->area.base.y += pos.y;
+
+		const int dx = pos.x - this->area.base.x;
+		const int dy = pos.y - this->area.base.y;
+		this->InitTileData();
+		for (const TrackVoxel *tv : this->piece->track_voxels) {
+			int xpos = dx + tv->dxyz.x; // (pos.x + tv->dxyz.x) - this->area.base.x
+			int ypos = dy + tv->dxyz.y; // (pos.y + tv->dxyz.y) - this->area.base.y
+			assert(xpos >= 0 && xpos < this->area.width);
+			assert(ypos >= 0 && ypos < this->area.height);
+
+			TileData &td = GetTileData(xpos, ypos);
+			td.cursor_enabled = true;
+			td.AddVoxel(pos.z + tv->dxyz.z);
+		}
+
+		this->MarkDirty();
+	}
 }
 
 /** Widgets of the coaster construction window. */
@@ -234,6 +288,9 @@ public:
 	void OnChange(ChangeCode code, uint32 parameter) override;
 	void OnClick(WidgetNumber widget, const Point16 &pos) override;
 
+	void SelectorMouseMoveEvent(Viewport *vp, const Point16 &pos) override;
+	void SelectorMouseButtonEvent(uint8 state) override;
+
 private:
 	CoasterInstance *ci; ///< Roller coaster instance to build or edit.
 
@@ -252,6 +309,8 @@ private:
 	void SetupSelection();
 	int SetButtons(int start_widget, int count, uint avail, int cur_sel, int invalid_val);
 	int BuildTrackPiece();
+
+	TrackPieceMouseMode piece_selector; ///< Selector for displaying new track pieces.
 };
 
 /**
@@ -262,8 +321,8 @@ CoasterBuildWindow::CoasterBuildWindow(CoasterInstance *ci) : GuiWindow(WC_COAST
 {
 	this->ci = ci;
 	this->SetupWidgetTree(_coaster_construction_gui_parts, lengthof(_coaster_construction_gui_parts));
-	_coaster_builder.OpenWindow(this->ci->GetIndex());
-	_mouse_modes.SetMouseMode(MM_COASTER_BUILD);
+// XXX	_coaster_builder.OpenWindow(this->ci->GetIndex());
+// XXX	_mouse_modes.SetMouseMode(MM_COASTER_BUILD);
 
 	int first = this->ci->GetFirstPlacedTrackPiece();
 	if (first >= 0) {
@@ -282,12 +341,13 @@ CoasterBuildWindow::CoasterBuildWindow(CoasterInstance *ci) : GuiWindow(WC_COAST
 	this->sel_platform = BSL_NONE;
 	this->sel_power = BSL_NONE;
 
+	this->SetSelector(&this->piece_selector);
 	this->SetupSelection();
 }
 
 CoasterBuildWindow::~CoasterBuildWindow()
 {
-	_coaster_builder.CloseWindow(this->ci->GetIndex());
+// XXX	_coaster_builder.CloseWindow(this->ci->GetIndex());
 
 	if (!GetWindowByType(WC_COASTER_MANAGER, this->wnumber) && !this->ci->IsAccessible()) {
 		_rides_manager.DeleteInstance(this->ci->GetIndex());
@@ -553,19 +613,55 @@ void CoasterBuildWindow::SetupSelection()
 	this->sel_platform = static_cast<BoolSelect>(this->SetButtons(CCW_NO_PLATFORM, 2, avail_platform, this->sel_platform, BSL_NONE));
 	this->sel_power = static_cast<BoolSelect>(this->SetButtons(CCW_NOT_POWERED, 2, avail_power, this->sel_power, BSL_NONE));
 
-	if (this->sel_piece != nullptr) {
-		if (this->cur_piece == nullptr) {
-			_coaster_builder.SelectPosition(this->wnumber, this->sel_piece, this->build_direction);
-		} else {
-			if (this->cur_after) {
-				TileEdge dir = (TileEdge)(this->cur_piece->piece->exit_connect & 3); /// \todo Define this in the data format
-				_coaster_builder.DisplayPiece(this->wnumber, this->sel_piece, this->cur_piece->GetEndXYZ(), dir);
-			}
-			// XXX else: display before start.
-		}
-	} else {
-		_coaster_builder.ShowNoPiece(this->wnumber);
+	if (this->sel_piece == nullptr) {
+		this->piece_selector.SetSize(0, 0); // Nothing to display.
+		this->piece_selector.piece = nullptr;
+		return;
 	}
+
+	if (this->cur_piece == nullptr) { // Display start-piece, moving it around.
+		this->piece_selector.SetTrackPiece(XYZPoint16(0, 0, 0), this->sel_piece);
+// XXX			_coaster_builder.SelectPosition(this->wnumber, this->sel_piece, this->build_direction);
+		return;
+	}
+
+	if (this->cur_after) { // Disply next coaster piece.
+		this->piece_selector.SetTrackPiece(this->cur_piece->GetEndXYZ(), this->sel_piece);
+//				TileEdge dir = (TileEdge)(this->cur_piece->piece->exit_connect & 3); /// \todo Define this in the data format
+// XXX				_coaster_builder.DisplayPiece(this->wnumber, this->sel_piece, this->cur_piece->GetEndXYZ(), dir);
+		return;
+	}
+
+	// Display previous coaster piece.
+	// XXX Fix me
+	this->piece_selector.SetSize(0, 0); // XXX Fix me
+	this->piece_selector.piece = nullptr;
+}
+
+void CoasterBuildWindow::SelectorMouseMoveEvent(Viewport *vp, const Point16 &pos)
+{
+	if (this->selector == nullptr || this->piece_selector.piece == nullptr) return; // No active selector.
+	if (this->sel_piece == nullptr || this->cur_piece != nullptr) return; // No piece, or fixed position.
+
+	FinderData fdata(CS_GROUND, FW_TILE);
+	if (vp->ComputeCursorPosition(&fdata) != CS_GROUND) return;
+	XYZPoint16 &piece_base = this->piece_selector.piece_pos;
+	int dx = fdata.voxel_pos.x - piece_base.x;
+	int dy = fdata.voxel_pos.y - piece_base.y;
+	if (dx == 0 && dy == 0) return;
+
+	this->piece_selector.MarkDirty();
+
+	this->piece_selector.SetPosition(this->piece_selector.area.base.x + dx, this->piece_selector.area.base.y + dy);
+	piece_base.x += dx; // Also update base position of the piece.
+	piece_base.y += dy;
+
+	this->piece_selector.MarkDirty();
+}
+
+void CoasterBuildWindow::SelectorMouseButtonEvent(uint8 state)
+{
+	printf("click!\n");
 }
 
 /**
@@ -575,7 +671,8 @@ void CoasterBuildWindow::SetupSelection()
 int CoasterBuildWindow::BuildTrackPiece()
 {
 	if (this->sel_piece == nullptr) return -1;
-	PositionedTrackPiece ptp(_coaster_builder.track_pos, this->sel_piece);
+	return -1;
+	PositionedTrackPiece ptp(XYZPoint16(0, 0, 0), /*_coaster_builder.track_pos,*/ this->sel_piece);
 	if (!ptp.CanBePlaced()) return -1;
 
 	/* Add the piece to the coaster instance. */
@@ -591,7 +688,7 @@ int CoasterBuildWindow::BuildTrackPiece()
 
 void CoasterBuildWindow::OnChange(ChangeCode code, uint32 parameter)
 {
-	if (code != CHG_PIECE_POSITIONED || parameter != 0) return;
+	if (code != CHG_PIECE_POSITIONED || parameter != 0) return; // XXX ???
 
 	int index = this->BuildTrackPiece();
 	if (index >= 0) {
@@ -616,723 +713,723 @@ void ShowCoasterBuildGui(CoasterInstance *coaster)
 	new CoasterBuildWindow(coaster);
 }
 
-/** State in the coaster build mouse mode. */
-class CoasterBuildState {
-public:
-	/**
-	 * Constructor of a build mouse mode state.
-	 * @param mode Mouse mode reference.
-	 */
-	CoasterBuildState(CoasterBuildMode &mode) : mode(&mode)
-	{
-	}
-
-	/**
-	 * Notification to the mouse mode that a coaster construction window has been opened.
-	 * @param instance Ride number of the window.
-	 */
-	virtual void OpenWindow(uint16 instance) const = 0;
-
-	/**
-	 * Notification to the mouse mode that a coaster construction window has been closed.
-	 * @param instance Ride number of the window.
-	 */
-	virtual void CloseWindow(uint16 instance) const = 0;
-
-	/**
-	 * Query from the viewport whether the mouse mode may be activated.
-	 * @return The mouse mode may be activated.
-	 * @see MouseMode::MayActivateMode
-	 */
-	virtual bool MayActivateMode() const = 0;
-
-	/**
-	 * Notification from the viewport that the mouse mode has been activated.
-	 * @param pos Current mouse position.
-	 * @see MouseMode::ActivateMode
-	 */
-	virtual void ActivateMode(const Point16 &pos) const = 0;
-
-	/**
-	 * Notification from the viewport that the mouse has moved.
-	 * @param vp The viewport.
-	 * @param old_pos Previous position of the mouse.
-	 * @param pos Current mouse position.
-	 * @see MouseMode::OnMouseMoveEvent
-	 */
-	virtual void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const = 0;
-
-	/**
-	 * Notification from the viewport that a mouse button has changed value.
-	 * @param vp The viewport.
-	 * @param state Old and new state of the mouse buttons.
-	 * @see MouseMode::OnMouseButtonEvent
-	 */
-	virtual void OnMouseButtonEvent(Viewport *vp, uint8 state) const = 0;
-
-	/**
-	 * Notification from the viewport that the mouse mode has been de-activated.
-	 * @see MouseMode::LeaveMode
-	 */
-	virtual void LeaveMode() const = 0;
-
-	/**
-	 * Query from the viewport whether the mouse mode wants to have cursors displayed.
-	 * @return Cursors should be enabled.
-	 * @see MouseMode::EnableCursors
-	 */
-	virtual bool EnableCursors() const = 0;
-
-	/**
-	 * Notification from the construction window to display no track piece.
-	 * @param instance Ride number of the window.
-	 */
-	virtual void ShowNoPiece(uint16 instance) const = 0;
-
-	/**
-	 * Notification from the construction window to display a track piece attached to the mouse cursor.
-	 * @param instance Ride number of the window.
-	 * @param piece Track piece to display.
-	 * @param direction Direction of building (to use with a cursor).
-	 */
-	virtual void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const = 0;
-
-	/**
-	 * Notification from the construction window to display a track piece at a given position.
-	 * @param instance Ride number of the window.
-	 * @param piece Track piece to display.
-	 * @param vox Position of the piece.
-	 * @param direction Direction of building (to use with a cursor).
-	 */
-	virtual void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const = 0;
-
-	CoasterBuildMode * const mode; ///< Coaster build mouse mode.
-};
-
-/** State when no coaster construction window is opened. */
-class CoasterBuildStateOff : public CoasterBuildState {
-public:
-	/**
-	 * Constructor of the #CoasterBuildStateOff state.
-	 * @param mode Builder mode.
-	 */
-	CoasterBuildStateOff(CoasterBuildMode &mode) : CoasterBuildState(mode)
-	{
-	}
-
-	void OpenWindow(uint16 instance) const override
-	{
-		this->mode->instance = instance;
-		this->mode->SetNoPiece();
-		this->mode->DisableDisplay();
-		this->mode->SetState(BS_STARTING);
-	}
-
-	void CloseWindow(uint16 instance) const override
-	{
-	}
-
-	bool MayActivateMode() const override
-	{
-		return false;
-	}
-
-	void ActivateMode(const Point16 &pos) const override
-	{
-		NOT_REACHED(); // Should never happen.
-	}
-
-	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
-	{
-	}
-
-	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
-	{
-	}
-
-	void LeaveMode() const override
-	{
-	}
-
-	bool EnableCursors() const override
-	{
-		return false;
-	}
-
-	void ShowNoPiece(uint16 instance) const override
-	{
-	}
-
-	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
-	{
-	}
-
-	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
-	{
-	}
-};
-
-/** State with opened window, but no active mouse mode yet. */
-class CoasterBuildStateStarting : public CoasterBuildState {
-public:
-	/**
-	 * Constructor of the #CoasterBuildStateStarting state.
-	 * @param mode Builder mode.
-	 */
-	CoasterBuildStateStarting(CoasterBuildMode &mode) : CoasterBuildState(mode)
-	{
-	}
-
-	void OpenWindow(uint16 instance) const override
-	{
-		this->mode->instance = instance; // Nothing has happened yet, so switching can still be done.
-	}
-
-	void CloseWindow(uint16 instance) const override
-	{
-		if (this->mode->instance != instance) return;
-
-		this->mode->instance = INVALID_RIDE_INSTANCE;
-		this->mode->SetState(BS_OFF);
-	}
-
-	bool MayActivateMode() const override
-	{
-		return true;
-	}
-
-	void ActivateMode(const Point16 &pos) const override
-	{
-		this->mode->EnableDisplay();
-		this->mode->UpdateDisplay(false);
-		BuilderState new_state;
-		if (this->mode->cur_piece == nullptr) {
-			new_state = BS_ON;
-		} else if (this->mode->use_mousepos) {
-			new_state = BS_MOUSE;
-		} else {
-			new_state = BS_FIXED;
-		}
-		this->mode->SetState(new_state);
-	}
-
-	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
-	{
-	}
-
-	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
-	{
-	}
-
-	void LeaveMode() const override
-	{
-	}
-
-	bool EnableCursors() const override
-	{
-		return false;
-	}
-
-	void ShowNoPiece(uint16 instance) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetNoPiece();
-	}
-
-	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetSelectPosition(piece, direction);
-	}
-
-	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetFixedPiece(piece, vox, direction);
-	}
-};
-
-/** State for display a not-available track piece, or suppressing display of an available track piece. */
-class CoasterBuildStateOn : public CoasterBuildState {
-public:
-	/**
-	 * Constructor of the #CoasterBuildStateOn state.
-	 * @param mode Builder mode.
-	 */
-	CoasterBuildStateOn(CoasterBuildMode &mode) : CoasterBuildState(mode)
-	{
-	}
-
-	void OpenWindow(uint16 instance) const override
-	{
-	}
-
-	void CloseWindow(uint16 instance) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->DisableDisplay();
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_STARTING);
-		_mouse_modes.SetViewportMousemode(); // Select another mouse mode.
-	}
-
-	bool MayActivateMode() const override
-	{
-		return true; // But is already enabled, doesn't matter.
-	}
-
-	void ActivateMode(const Point16 &pos) const override
-	{
-		this->mode->SetMousePosition(pos);
-	}
-
-	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
-	{
-		this->mode->SetMousePosition(pos); // Nothing is displayed.
-	}
-
-	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
-	{
-		/* Nothing is displayed. */
-	}
-
-	void LeaveMode() const override
-	{
-		this->mode->DisableDisplay();
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_STARTING);
-	}
-
-	bool EnableCursors() const override
-	{
-		return false;
-	}
-
-	void ShowNoPiece(uint16 instance) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetNoPiece();
-	}
-
-	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetSelectPosition(piece, direction);
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_MOUSE);
-	}
-
-	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetFixedPiece(piece, vox, direction);
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_FIXED);
-	}
-};
-
-/** State to display a track piece at the position of the mouse (at the ground). */
-class CoasterBuildStateMouse : public CoasterBuildState {
-public:
-	/**
-	 * Constructor of the #CoasterBuildStateMouse state.
-	 * @param mode Builder mode.
-	 */
-	CoasterBuildStateMouse(CoasterBuildMode &mode) : CoasterBuildState(mode)
-	{
-	}
-
-	void OpenWindow(uint16 instance) const override
-	{
-	}
-
-	void CloseWindow(uint16 instance) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->DisableDisplay();
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_DOWN);
-		_mouse_modes.SetViewportMousemode(); // Select another mouse mode.
-	}
-
-	bool MayActivateMode() const override
-	{
-		return true;
-	}
-
-	void ActivateMode(const Point16 &pos) const override
-	{
-		this->mode->SetMousePosition(pos);
-		this->mode->UpdateDisplay(true);
-	}
-
-	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
-	{
-		this->mode->SetMousePosition(pos);
-		this->mode->UpdateDisplay(true);
-	}
-
-	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
-	{
-		PositionedTrackPiece ptp(this->mode->track_pos, this->mode->cur_piece);
-		if (ptp.CanBePlaced()) {
-			this->mode->SetNoPiece();
-			this->mode->UpdateDisplay(false);
-			NotifyChange(WC_COASTER_BUILD, this->mode->instance, CHG_PIECE_POSITIONED, 0);
-			this->mode->SetState(BS_ON);
-		}
-	}
-
-	void LeaveMode() const override
-	{
-		this->mode->DisableDisplay();
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_STARTING);
-	}
-
-	bool EnableCursors() const override
-	{
-		return true;
-	}
-
-	void ShowNoPiece(uint16 instance) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetNoPiece();
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_ON);
-	}
-
-	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetSelectPosition(piece, direction);
-		this->mode->UpdateDisplay(false);
-	}
-
-	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetFixedPiece(piece, vox, direction);
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_FIXED);
-	}
-};
-
-/** Display a track piece at a fixed position in the world. */
-class CoasterBuildStateFixed : public CoasterBuildState {
-public:
-	/**
-	 * Constructor of the #CoasterBuildStateFixed state.
-	 * @param mode Builder mode.
-	 */
-	CoasterBuildStateFixed(CoasterBuildMode &mode) : CoasterBuildState(mode)
-	{
-	}
-
-	void OpenWindow(uint16 instance) const override
-	{
-	}
-
-	void CloseWindow(uint16 instance) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->DisableDisplay();
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_DOWN);
-		_mouse_modes.SetViewportMousemode(); // Select another mouse mode.
-	}
-
-	bool MayActivateMode() const override
-	{
-		return true; // But is already enabled, doesn't matter.
-	}
-
-	void ActivateMode(const Point16 &pos) const override
-	{
-	}
-
-	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
-	{
-	}
-
-	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
-	{
-	}
-
-	void LeaveMode() const override
-	{
-		this->mode->DisableDisplay();
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_STARTING);
-	}
-
-	bool EnableCursors() const override
-	{
-		return true;
-	}
-
-	void ShowNoPiece(uint16 instance) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetNoPiece();
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_ON);
-	}
-
-	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetSelectPosition(piece, direction);
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_MOUSE);
-	}
-
-	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
-	{
-		if (this->mode->instance != instance) return;
-		this->mode->SetFixedPiece(piece, vox, direction);
-		this->mode->UpdateDisplay(false);
-	}
-};
-
-/** Stopping state, mouse mode wants to deactivate, but has to wait until it gets permission to do so. */
-class CoasterBuildStateStopping : public CoasterBuildState {
-public:
-	/**
-	 * Constructor of the #CoasterBuildStateStopping state.
-	 * @param mode Builder mode.
-	 */
-	CoasterBuildStateStopping(CoasterBuildMode &mode) : CoasterBuildState(mode)
-	{
-	}
-
-	void OpenWindow(uint16 instance) const override
-	{
-		this->mode->instance = instance;
-		this->mode->SetNoPiece();
-		this->mode->EnableDisplay();
-		this->mode->UpdateDisplay(false);
-		this->mode->SetState(BS_ON);
-	}
-
-	void CloseWindow(uint16 instance) const override
-	{
-	}
-
-	bool MayActivateMode() const override
-	{
-		return false;
-	}
-
-	void ActivateMode(const Point16 &pos) const override
-	{
-		this->mode->SetMousePosition(pos);
-	}
-
-	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
-	{
-	}
-
-	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
-	{
-	}
-
-	void LeaveMode() const override
-	{
-		this->mode->SetState(BS_OFF);
-	}
-
-	bool EnableCursors() const override
-	{
-		return false;
-	}
-
-	void ShowNoPiece(uint16 instance) const override
-	{
-	}
-
-	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
-	{
-	}
-
-	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
-	{
-	}
-};
-
-static const CoasterBuildStateOff      _coaster_build_state_off(_coaster_builder);      ///< Off state of the coaster build mouse mode.
-static const CoasterBuildStateStarting _coaster_build_state_starting(_coaster_builder); ///< Starting state of the coaster build mouse mode.
-static const CoasterBuildStateOn       _coaster_build_state_on(_coaster_builder);       ///< On state of the coaster build mouse mode.
-static const CoasterBuildStateMouse    _coaster_build_state_mouse(_coaster_builder);    ///< Select position state of the coaster build mouse mode.
-static const CoasterBuildStateFixed    _coaster_build_state_fixed(_coaster_builder);    ///< Show fixed position state of the coaster build mouse mode.
-static const CoasterBuildStateStopping _coaster_build_state_stopping(_coaster_builder); ///< Stopping state of the coaster build mouse mode.
+// XXX /** State in the coaster build mouse mode. */
+// XXX class CoasterBuildState {
+// XXX public:
+// XXX 	/**
+// XXX 	 * Constructor of a build mouse mode state.
+// XXX 	 * @param mode Mouse mode reference.
+// XXX 	 */
+// XXX 	CoasterBuildState(CoasterBuildMode &mode) : mode(&mode)
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	/**
+// XXX 	 * Notification to the mouse mode that a coaster construction window has been opened.
+// XXX 	 * @param instance Ride number of the window.
+// XXX 	 */
+// XXX 	virtual void OpenWindow(uint16 instance) const = 0;
+// XXX 
+// XXX 	/**
+// XXX 	 * Notification to the mouse mode that a coaster construction window has been closed.
+// XXX 	 * @param instance Ride number of the window.
+// XXX 	 */
+// XXX 	virtual void CloseWindow(uint16 instance) const = 0;
+// XXX 
+// XXX 	/**
+// XXX 	 * Query from the viewport whether the mouse mode may be activated.
+// XXX 	 * @return The mouse mode may be activated.
+// XXX 	 * @see MouseMode::MayActivateMode
+// XXX 	 */
+// XXX 	virtual bool MayActivateMode() const = 0;
+// XXX 
+// XXX 	/**
+// XXX 	 * Notification from the viewport that the mouse mode has been activated.
+// XXX 	 * @param pos Current mouse position.
+// XXX 	 * @see MouseMode::ActivateMode
+// XXX 	 */
+// XXX 	virtual void ActivateMode(const Point16 &pos) const = 0;
+// XXX 
+// XXX 	/**
+// XXX 	 * Notification from the viewport that the mouse has moved.
+// XXX 	 * @param vp The viewport.
+// XXX 	 * @param old_pos Previous position of the mouse.
+// XXX 	 * @param pos Current mouse position.
+// XXX 	 * @see MouseMode::OnMouseMoveEvent
+// XXX 	 */
+// XXX 	virtual void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const = 0;
+// XXX 
+// XXX 	/**
+// XXX 	 * Notification from the viewport that a mouse button has changed value.
+// XXX 	 * @param vp The viewport.
+// XXX 	 * @param state Old and new state of the mouse buttons.
+// XXX 	 * @see MouseMode::OnMouseButtonEvent
+// XXX 	 */
+// XXX 	virtual void OnMouseButtonEvent(Viewport *vp, uint8 state) const = 0;
+// XXX 
+// XXX 	/**
+// XXX 	 * Notification from the viewport that the mouse mode has been de-activated.
+// XXX 	 * @see MouseMode::LeaveMode
+// XXX 	 */
+// XXX 	virtual void LeaveMode() const = 0;
+// XXX 
+// XXX 	/**
+// XXX 	 * Query from the viewport whether the mouse mode wants to have cursors displayed.
+// XXX 	 * @return Cursors should be enabled.
+// XXX 	 * @see MouseMode::EnableCursors
+// XXX 	 */
+// XXX 	virtual bool EnableCursors() const = 0;
+// XXX 
+// XXX 	/**
+// XXX 	 * Notification from the construction window to display no track piece.
+// XXX 	 * @param instance Ride number of the window.
+// XXX 	 */
+// XXX 	virtual void ShowNoPiece(uint16 instance) const = 0;
+// XXX 
+// XXX 	/**
+// XXX 	 * Notification from the construction window to display a track piece attached to the mouse cursor.
+// XXX 	 * @param instance Ride number of the window.
+// XXX 	 * @param piece Track piece to display.
+// XXX 	 * @param direction Direction of building (to use with a cursor).
+// XXX 	 */
+// XXX 	virtual void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const = 0;
+// XXX 
+// XXX 	/**
+// XXX 	 * Notification from the construction window to display a track piece at a given position.
+// XXX 	 * @param instance Ride number of the window.
+// XXX 	 * @param piece Track piece to display.
+// XXX 	 * @param vox Position of the piece.
+// XXX 	 * @param direction Direction of building (to use with a cursor).
+// XXX 	 */
+// XXX 	virtual void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const = 0;
+// XXX 
+// XXX 	CoasterBuildMode * const mode; ///< Coaster build mouse mode.
+// XXX };
+// XXX 
+// XXX /** State when no coaster construction window is opened. */
+// XXX class CoasterBuildStateOff : public CoasterBuildState {
+// XXX public:
+// XXX 	/**
+// XXX 	 * Constructor of the #CoasterBuildStateOff state.
+// XXX 	 * @param mode Builder mode.
+// XXX 	 */
+// XXX 	CoasterBuildStateOff(CoasterBuildMode &mode) : CoasterBuildState(mode)
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OpenWindow(uint16 instance) const override
+// XXX 	{
+// XXX 		this->mode->instance = instance;
+// XXX 		this->mode->SetNoPiece();
+// XXX 		this->mode->DisableDisplay();
+// XXX 		this->mode->SetState(BS_STARTING);
+// XXX 	}
+// XXX 
+// XXX 	void CloseWindow(uint16 instance) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	bool MayActivateMode() const override
+// XXX 	{
+// XXX 		return false;
+// XXX 	}
+// XXX 
+// XXX 	void ActivateMode(const Point16 &pos) const override
+// XXX 	{
+// XXX 		NOT_REACHED(); // Should never happen.
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void LeaveMode() const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	bool EnableCursors() const override
+// XXX 	{
+// XXX 		return false;
+// XXX 	}
+// XXX 
+// XXX 	void ShowNoPiece(uint16 instance) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
+// XXX 	{
+// XXX 	}
+// XXX };
+// XXX 
+// XXX /** State with opened window, but no active mouse mode yet. */
+// XXX class CoasterBuildStateStarting : public CoasterBuildState {
+// XXX public:
+// XXX 	/**
+// XXX 	 * Constructor of the #CoasterBuildStateStarting state.
+// XXX 	 * @param mode Builder mode.
+// XXX 	 */
+// XXX 	CoasterBuildStateStarting(CoasterBuildMode &mode) : CoasterBuildState(mode)
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OpenWindow(uint16 instance) const override
+// XXX 	{
+// XXX 		this->mode->instance = instance; // Nothing has happened yet, so switching can still be done.
+// XXX 	}
+// XXX 
+// XXX 	void CloseWindow(uint16 instance) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 
+// XXX 		this->mode->instance = INVALID_RIDE_INSTANCE;
+// XXX 		this->mode->SetState(BS_OFF);
+// XXX 	}
+// XXX 
+// XXX 	bool MayActivateMode() const override
+// XXX 	{
+// XXX 		return true;
+// XXX 	}
+// XXX 
+// XXX 	void ActivateMode(const Point16 &pos) const override
+// XXX 	{
+// XXX 		this->mode->EnableDisplay();
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		BuilderState new_state;
+// XXX 		if (this->mode->cur_piece == nullptr) {
+// XXX 			new_state = BS_ON;
+// XXX 		} else if (this->mode->use_mousepos) {
+// XXX 			new_state = BS_MOUSE;
+// XXX 		} else {
+// XXX 			new_state = BS_FIXED;
+// XXX 		}
+// XXX 		this->mode->SetState(new_state);
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void LeaveMode() const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	bool EnableCursors() const override
+// XXX 	{
+// XXX 		return false;
+// XXX 	}
+// XXX 
+// XXX 	void ShowNoPiece(uint16 instance) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetNoPiece();
+// XXX 	}
+// XXX 
+// XXX 	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetSelectPosition(piece, direction);
+// XXX 	}
+// XXX 
+// XXX 	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetFixedPiece(piece, vox, direction);
+// XXX 	}
+// XXX };
+// XXX 
+// XXX /** State for display a not-available track piece, or suppressing display of an available track piece. */
+// XXX class CoasterBuildStateOn : public CoasterBuildState {
+// XXX public:
+// XXX 	/**
+// XXX 	 * Constructor of the #CoasterBuildStateOn state.
+// XXX 	 * @param mode Builder mode.
+// XXX 	 */
+// XXX 	CoasterBuildStateOn(CoasterBuildMode &mode) : CoasterBuildState(mode)
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OpenWindow(uint16 instance) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void CloseWindow(uint16 instance) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->DisableDisplay();
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_STARTING);
+// XXX 		_mouse_modes.SetViewportMousemode(); // Select another mouse mode.
+// XXX 	}
+// XXX 
+// XXX 	bool MayActivateMode() const override
+// XXX 	{
+// XXX 		return true; // But is already enabled, doesn't matter.
+// XXX 	}
+// XXX 
+// XXX 	void ActivateMode(const Point16 &pos) const override
+// XXX 	{
+// XXX 		this->mode->SetMousePosition(pos);
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
+// XXX 	{
+// XXX 		this->mode->SetMousePosition(pos); // Nothing is displayed.
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
+// XXX 	{
+// XXX 		/* Nothing is displayed. */
+// XXX 	}
+// XXX 
+// XXX 	void LeaveMode() const override
+// XXX 	{
+// XXX 		this->mode->DisableDisplay();
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_STARTING);
+// XXX 	}
+// XXX 
+// XXX 	bool EnableCursors() const override
+// XXX 	{
+// XXX 		return false;
+// XXX 	}
+// XXX 
+// XXX 	void ShowNoPiece(uint16 instance) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetNoPiece();
+// XXX 	}
+// XXX 
+// XXX 	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetSelectPosition(piece, direction);
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_MOUSE);
+// XXX 	}
+// XXX 
+// XXX 	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetFixedPiece(piece, vox, direction);
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_FIXED);
+// XXX 	}
+// XXX };
+// XXX 
+// XXX /** State to display a track piece at the position of the mouse (at the ground). */
+// XXX class CoasterBuildStateMouse : public CoasterBuildState {
+// XXX public:
+// XXX 	/**
+// XXX 	 * Constructor of the #CoasterBuildStateMouse state.
+// XXX 	 * @param mode Builder mode.
+// XXX 	 */
+// XXX 	CoasterBuildStateMouse(CoasterBuildMode &mode) : CoasterBuildState(mode)
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OpenWindow(uint16 instance) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void CloseWindow(uint16 instance) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->DisableDisplay();
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_DOWN);
+// XXX 		_mouse_modes.SetViewportMousemode(); // Select another mouse mode.
+// XXX 	}
+// XXX 
+// XXX 	bool MayActivateMode() const override
+// XXX 	{
+// XXX 		return true;
+// XXX 	}
+// XXX 
+// XXX 	void ActivateMode(const Point16 &pos) const override
+// XXX 	{
+// XXX 		this->mode->SetMousePosition(pos);
+// XXX 		this->mode->UpdateDisplay(true);
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
+// XXX 	{
+// XXX 		this->mode->SetMousePosition(pos);
+// XXX 		this->mode->UpdateDisplay(true);
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
+// XXX 	{
+// XXX 		PositionedTrackPiece ptp(this->mode->track_pos, this->mode->cur_piece);
+// XXX 		if (ptp.CanBePlaced()) {
+// XXX 			this->mode->SetNoPiece();
+// XXX 			this->mode->UpdateDisplay(false);
+// XXX 			NotifyChange(WC_COASTER_BUILD, this->mode->instance, CHG_PIECE_POSITIONED, 0);
+// XXX 			this->mode->SetState(BS_ON);
+// XXX 		}
+// XXX 	}
+// XXX 
+// XXX 	void LeaveMode() const override
+// XXX 	{
+// XXX 		this->mode->DisableDisplay();
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_STARTING);
+// XXX 	}
+// XXX 
+// XXX 	bool EnableCursors() const override
+// XXX 	{
+// XXX 		return true;
+// XXX 	}
+// XXX 
+// XXX 	void ShowNoPiece(uint16 instance) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetNoPiece();
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_ON);
+// XXX 	}
+// XXX 
+// XXX 	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetSelectPosition(piece, direction);
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 	}
+// XXX 
+// XXX 	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetFixedPiece(piece, vox, direction);
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_FIXED);
+// XXX 	}
+// XXX };
+// XXX 
+// XXX /** Display a track piece at a fixed position in the world. */
+// XXX class CoasterBuildStateFixed : public CoasterBuildState {
+// XXX public:
+// XXX 	/**
+// XXX 	 * Constructor of the #CoasterBuildStateFixed state.
+// XXX 	 * @param mode Builder mode.
+// XXX 	 */
+// XXX 	CoasterBuildStateFixed(CoasterBuildMode &mode) : CoasterBuildState(mode)
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OpenWindow(uint16 instance) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void CloseWindow(uint16 instance) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->DisableDisplay();
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_DOWN);
+// XXX 		_mouse_modes.SetViewportMousemode(); // Select another mouse mode.
+// XXX 	}
+// XXX 
+// XXX 	bool MayActivateMode() const override
+// XXX 	{
+// XXX 		return true; // But is already enabled, doesn't matter.
+// XXX 	}
+// XXX 
+// XXX 	void ActivateMode(const Point16 &pos) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void LeaveMode() const override
+// XXX 	{
+// XXX 		this->mode->DisableDisplay();
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_STARTING);
+// XXX 	}
+// XXX 
+// XXX 	bool EnableCursors() const override
+// XXX 	{
+// XXX 		return true;
+// XXX 	}
+// XXX 
+// XXX 	void ShowNoPiece(uint16 instance) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetNoPiece();
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_ON);
+// XXX 	}
+// XXX 
+// XXX 	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetSelectPosition(piece, direction);
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_MOUSE);
+// XXX 	}
+// XXX 
+// XXX 	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
+// XXX 	{
+// XXX 		if (this->mode->instance != instance) return;
+// XXX 		this->mode->SetFixedPiece(piece, vox, direction);
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 	}
+// XXX };
+// XXX 
+// XXX /** Stopping state, mouse mode wants to deactivate, but has to wait until it gets permission to do so. */
+// XXX class CoasterBuildStateStopping : public CoasterBuildState {
+// XXX public:
+// XXX 	/**
+// XXX 	 * Constructor of the #CoasterBuildStateStopping state.
+// XXX 	 * @param mode Builder mode.
+// XXX 	 */
+// XXX 	CoasterBuildStateStopping(CoasterBuildMode &mode) : CoasterBuildState(mode)
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OpenWindow(uint16 instance) const override
+// XXX 	{
+// XXX 		this->mode->instance = instance;
+// XXX 		this->mode->SetNoPiece();
+// XXX 		this->mode->EnableDisplay();
+// XXX 		this->mode->UpdateDisplay(false);
+// XXX 		this->mode->SetState(BS_ON);
+// XXX 	}
+// XXX 
+// XXX 	void CloseWindow(uint16 instance) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	bool MayActivateMode() const override
+// XXX 	{
+// XXX 		return false;
+// XXX 	}
+// XXX 
+// XXX 	void ActivateMode(const Point16 &pos) const override
+// XXX 	{
+// XXX 		this->mode->SetMousePosition(pos);
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void OnMouseButtonEvent(Viewport *vp, uint8 state) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void LeaveMode() const override
+// XXX 	{
+// XXX 		this->mode->SetState(BS_OFF);
+// XXX 	}
+// XXX 
+// XXX 	bool EnableCursors() const override
+// XXX 	{
+// XXX 		return false;
+// XXX 	}
+// XXX 
+// XXX 	void ShowNoPiece(uint16 instance) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction) const override
+// XXX 	{
+// XXX 	}
+// XXX 
+// XXX 	void DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction) const override
+// XXX 	{
+// XXX 	}
+// XXX };
+
+// XXX static const CoasterBuildStateOff      _coaster_build_state_off(_coaster_builder);      ///< Off state of the coaster build mouse mode.
+// XXX static const CoasterBuildStateStarting _coaster_build_state_starting(_coaster_builder); ///< Starting state of the coaster build mouse mode.
+// XXX static const CoasterBuildStateOn       _coaster_build_state_on(_coaster_builder);       ///< On state of the coaster build mouse mode.
+// XXX static const CoasterBuildStateMouse    _coaster_build_state_mouse(_coaster_builder);    ///< Select position state of the coaster build mouse mode.
+// XXX static const CoasterBuildStateFixed    _coaster_build_state_fixed(_coaster_builder);    ///< Show fixed position state of the coaster build mouse mode.
+// XXX static const CoasterBuildStateStopping _coaster_build_state_stopping(_coaster_builder); ///< Stopping state of the coaster build mouse mode.
 
 /** Available states of the coaster build mouse mode. */
-static const CoasterBuildState *_coaster_build_states[] = {
-	&_coaster_build_state_off,      // BS_OFF
-	&_coaster_build_state_starting, // BS_STARTING
-	&_coaster_build_state_on,       // BS_ON
-	&_coaster_build_state_mouse,    // BS_MOUSE
-	&_coaster_build_state_fixed,    // BS_FIXED
-	&_coaster_build_state_stopping, // BS_DOWN
-};
+// XXX static const CoasterBuildState *_coaster_build_states[] = {
+// XXX 	&_coaster_build_state_off,      // BS_OFF
+// XXX 	&_coaster_build_state_starting, // BS_STARTING
+// XXX 	&_coaster_build_state_on,       // BS_ON
+// XXX 	&_coaster_build_state_mouse,    // BS_MOUSE
+// XXX 	&_coaster_build_state_fixed,    // BS_FIXED
+// XXX 	&_coaster_build_state_stopping, // BS_DOWN
+// XXX };
 
-CoasterBuildMode::CoasterBuildMode() : MouseMode(WC_COASTER_BUILD, MM_COASTER_BUILD)
-{
-	this->instance = INVALID_RIDE_INSTANCE;
-	this->state = BS_OFF;
-	this->mouse_state = 0;
-	this->SetNoPiece();
-}
-
-/**
- * Notification to the mouse mode that a coaster construction window has been opened.
- * @param instance Ride number of the window.
- */
-void CoasterBuildMode::OpenWindow(uint16 instance)
-{
-	_coaster_build_states[this->state]->OpenWindow(instance);
-}
-
-/**
- * Notification to the mouse mode that a coaster construction window has been closed.
- * @param instance Ride number of the window.
- */
-void CoasterBuildMode::CloseWindow(uint16 instance)
-{
-	_coaster_build_states[this->state]->CloseWindow(instance);
-}
-
-/**
- * Notification from the construction window to display no track piece.
- * @param instance Ride number of the window.
- */
-void CoasterBuildMode::ShowNoPiece(uint16 instance)
-{
-	_coaster_build_states[this->state]->ShowNoPiece(instance);
-}
-
-/**
- * Notification from the construction window to display a track piece attached to the mouse cursor.
- * @param instance Ride number of the window.
- * @param piece Track piece to display.
- * @param direction Direction of building (to use with a cursor).
- */
-void CoasterBuildMode::SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction)
-{
-	_coaster_build_states[this->state]->SelectPosition(instance, piece, direction);
-}
-
-/**
- * Notification from the construction window to display a track piece at a given position.
- * @param instance Ride number of the window.
- * @param piece Track piece to display.
- * @param vox Position of the piece.
- * @param direction Direction of building (to use with a cursor).
- */
-void CoasterBuildMode::DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction)
-{
-	_coaster_build_states[this->state]->DisplayPiece(instance, piece, vox, direction);
-}
-
-/**
- * Query from the viewport whether the mouse mode may be activated.
- * @return The mouse mode may be activated.
- * @see MouseMode::MayActivateMode
- */
-bool CoasterBuildMode::MayActivateMode()
-{
-	return _coaster_build_states[this->state]->MayActivateMode();
-}
-
-/**
- * Notification from the viewport that the mouse mode has been activated.
- * @param pos Current mouse position.
- * @see MouseMode::ActivateMode
- */
-void CoasterBuildMode::ActivateMode(const Point16 &pos)
-{
-	_coaster_build_states[this->state]->ActivateMode(pos);
-}
-
-/**
- * Notification from the viewport that the mouse mode has been de-activated.
- * @see MouseMode::LeaveMode
- */
-void CoasterBuildMode::LeaveMode()
-{
-	_coaster_build_states[this->state]->LeaveMode();
-}
-
-/**
- * Notification from the viewport that the mouse has moved.
- * @param vp The viewport.
- * @param old_pos Previous position of the mouse.
- * @param pos Current mouse position.
- * @see MouseMode::OnMouseMoveEvent
- */
-void CoasterBuildMode::OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos)
-{
-	if ((this->mouse_state & MB_RIGHT) != 0) {
-		/* Drag the window if button is pressed down. */
-		Viewport *vp = GetViewport();
-		if (vp != nullptr) vp->MoveViewport(pos.x - old_pos.x, pos.y - old_pos.y);
-	}
-	_coaster_build_states[this->state]->OnMouseMoveEvent(vp, old_pos, pos);
-}
-
-/**
- * Notification from the viewport that a mouse button has changed value.
- * @param vp The viewport.
- * @param state Old and new state of the mouse buttons.
- * @see MouseMode::OnMouseButtonEvent
- */
-void CoasterBuildMode::OnMouseButtonEvent(Viewport *vp, uint8 state)
-{
-	this->mouse_state = state & MB_CURRENT;
-	_coaster_build_states[this->state]->OnMouseButtonEvent(vp, state);
-}
-
-/**
- * Query from the viewport whether the mouse mode wants to have cursors displayed.
- * @return Cursors should be enabled.
- * @see MouseMode::EnableCursors
- */
-bool CoasterBuildMode::EnableCursors()
-{
-	return _coaster_build_states[this->state]->EnableCursors();
-}
-
-/**
- * Update the displayed position.
- * @param mousepos_changed If set, check the mouse position to x/y/z again (and only update the display if it is different).
- */
-void CoasterBuildMode::UpdateDisplay(bool mousepos_changed)
-{
-	if (this->suppress_display || this->cur_piece == nullptr) {
-		DisableWorldAdditions();
-		return;
-	}
-
-	Viewport *vp = GetViewport();
-	if (use_mousepos) {
-		FinderData fdata(CS_GROUND, FW_TILE);
-		if (vp->ComputeCursorPosition(&fdata) != CS_GROUND) {
-			DisableWorldAdditions();
-			return;
-		}
-		/* Found ground, is the position the same? */
-		if (mousepos_changed && fdata.voxel_pos == this->track_pos) {
-			return;
-		}
-
-		this->track_pos = fdata.voxel_pos;
-	}
-	_additions.Clear();
-	EnableWorldAdditions();
-	PositionedTrackPiece ptp(this->track_pos, this->cur_piece);
-	CoasterInstance *ci = static_cast<CoasterInstance *>(_rides_manager.GetRideInstance(this->instance));
-	if (ptp.CanBePlaced()) ci->PlaceTrackPieceInAdditions(ptp);
-	vp->arrow_cursor.SetCursor(this->track_pos, (CursorType)(CUR_TYPE_ARROW_NE + this->direction));
-}
+// XXX CoasterBuildMode::CoasterBuildMode() : MouseMode(WC_COASTER_BUILD, MM_COASTER_BUILD)
+// XXX {
+// XXX 	this->instance = INVALID_RIDE_INSTANCE;
+// XXX 	this->state = BS_OFF;
+// XXX 	this->mouse_state = 0;
+// XXX 	this->SetNoPiece();
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Notification to the mouse mode that a coaster construction window has been opened.
+// XXX  * @param instance Ride number of the window.
+// XXX  */
+// XXX void CoasterBuildMode::OpenWindow(uint16 instance)
+// XXX {
+// XXX 	_coaster_build_states[this->state]->OpenWindow(instance);
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Notification to the mouse mode that a coaster construction window has been closed.
+// XXX  * @param instance Ride number of the window.
+// XXX  */
+// XXX void CoasterBuildMode::CloseWindow(uint16 instance)
+// XXX {
+// XXX 	_coaster_build_states[this->state]->CloseWindow(instance);
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Notification from the construction window to display no track piece.
+// XXX  * @param instance Ride number of the window.
+// XXX  */
+// XXX void CoasterBuildMode::ShowNoPiece(uint16 instance)
+// XXX {
+// XXX 	_coaster_build_states[this->state]->ShowNoPiece(instance);
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Notification from the construction window to display a track piece attached to the mouse cursor.
+// XXX  * @param instance Ride number of the window.
+// XXX  * @param piece Track piece to display.
+// XXX  * @param direction Direction of building (to use with a cursor).
+// XXX  */
+// XXX void CoasterBuildMode::SelectPosition(uint16 instance, ConstTrackPiecePtr piece, TileEdge direction)
+// XXX {
+// XXX 	_coaster_build_states[this->state]->SelectPosition(instance, piece, direction);
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Notification from the construction window to display a track piece at a given position.
+// XXX  * @param instance Ride number of the window.
+// XXX  * @param piece Track piece to display.
+// XXX  * @param vox Position of the piece.
+// XXX  * @param direction Direction of building (to use with a cursor).
+// XXX  */
+// XXX void CoasterBuildMode::DisplayPiece(uint16 instance, ConstTrackPiecePtr piece, const XYZPoint16 &vox, TileEdge direction)
+// XXX {
+// XXX 	_coaster_build_states[this->state]->DisplayPiece(instance, piece, vox, direction);
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Query from the viewport whether the mouse mode may be activated.
+// XXX  * @return The mouse mode may be activated.
+// XXX  * @see MouseMode::MayActivateMode
+// XXX  */
+// XXX bool CoasterBuildMode::MayActivateMode()
+// XXX {
+// XXX 	return _coaster_build_states[this->state]->MayActivateMode();
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Notification from the viewport that the mouse mode has been activated.
+// XXX  * @param pos Current mouse position.
+// XXX  * @see MouseMode::ActivateMode
+// XXX  */
+// XXX void CoasterBuildMode::ActivateMode(const Point16 &pos)
+// XXX {
+// XXX 	_coaster_build_states[this->state]->ActivateMode(pos);
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Notification from the viewport that the mouse mode has been de-activated.
+// XXX  * @see MouseMode::LeaveMode
+// XXX  */
+// XXX void CoasterBuildMode::LeaveMode()
+// XXX {
+// XXX 	_coaster_build_states[this->state]->LeaveMode();
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Notification from the viewport that the mouse has moved.
+// XXX  * @param vp The viewport.
+// XXX  * @param old_pos Previous position of the mouse.
+// XXX  * @param pos Current mouse position.
+// XXX  * @see MouseMode::OnMouseMoveEvent
+// XXX  */
+// XXX void CoasterBuildMode::OnMouseMoveEvent(Viewport *vp, const Point16 &old_pos, const Point16 &pos)
+// XXX {
+// XXX 	if ((this->mouse_state & MB_RIGHT) != 0) {
+// XXX 		/* Drag the window if button is pressed down. */
+// XXX 		Viewport *vp = GetViewport();
+// XXX 		if (vp != nullptr) vp->MoveViewport(pos.x - old_pos.x, pos.y - old_pos.y);
+// XXX 	}
+// XXX 	_coaster_build_states[this->state]->OnMouseMoveEvent(vp, old_pos, pos);
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Notification from the viewport that a mouse button has changed value.
+// XXX  * @param vp The viewport.
+// XXX  * @param state Old and new state of the mouse buttons.
+// XXX  * @see MouseMode::OnMouseButtonEvent
+// XXX  */
+// XXX void CoasterBuildMode::OnMouseButtonEvent(Viewport *vp, uint8 state)
+// XXX {
+// XXX 	this->mouse_state = state & MB_CURRENT;
+// XXX 	_coaster_build_states[this->state]->OnMouseButtonEvent(vp, state);
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Query from the viewport whether the mouse mode wants to have cursors displayed.
+// XXX  * @return Cursors should be enabled.
+// XXX  * @see MouseMode::EnableCursors
+// XXX  */
+// XXX bool CoasterBuildMode::EnableCursors()
+// XXX {
+// XXX 	return _coaster_build_states[this->state]->EnableCursors();
+// XXX }
+// XXX 
+// XXX /**
+// XXX  * Update the displayed position.
+// XXX  * @param mousepos_changed If set, check the mouse position to x/y/z again (and only update the display if it is different).
+// XXX  */
+// XXX void CoasterBuildMode::UpdateDisplay(bool mousepos_changed)
+// XXX {
+// XXX 	if (this->suppress_display || this->cur_piece == nullptr) {
+// XXX 		DisableWorldAdditions();
+// XXX 		return;
+// XXX 	}
+// XXX 
+// XXX 	Viewport *vp = GetViewport();
+// XXX 	if (use_mousepos) {
+// XXX 		FinderData fdata(CS_GROUND, FW_TILE);
+// XXX 		if (vp->ComputeCursorPosition(&fdata) != CS_GROUND) {
+// XXX 			DisableWorldAdditions();
+// XXX 			return;
+// XXX 		}
+// XXX 		/* Found ground, is the position the same? */
+// XXX 		if (mousepos_changed && fdata.voxel_pos == this->track_pos) {
+// XXX 			return;
+// XXX 		}
+// XXX 
+// XXX 		this->track_pos = fdata.voxel_pos;
+// XXX 	}
+// XXX 	_additions.Clear();
+// XXX 	EnableWorldAdditions();
+// XXX 	PositionedTrackPiece ptp(this->track_pos, this->cur_piece);
+// XXX 	CoasterInstance *ci = static_cast<CoasterInstance *>(_rides_manager.GetRideInstance(this->instance));
+// XXX 	if (ptp.CanBePlaced()) ci->PlaceTrackPieceInAdditions(ptp);
+// XXX 	vp->arrow_cursor.SetCursor(this->track_pos, (CursorType)(CUR_TYPE_ARROW_NE + this->direction));
+// XXX }

@@ -63,6 +63,22 @@ struct TileData {
 	uint8 lowest;        ///< Lowest voxel that should be rendered.
 	uint8 highest;       ///< Highest voxel that should be rendered.
 	bool cursor_enabled; ///< Whether the tile should have a cursor displayed.
+
+	/**
+	 * Add a (z-position) of a voxel to the vertical voxel range to render.
+	 * @param zpos Vertical voxel position to add.
+	 * @see CursorMouseMode::GetRange
+	 */
+	inline void AddVoxel(uint8 zpos)
+	{
+		if (this->lowest > this->highest) {
+			this->lowest = zpos;
+			this->highest = zpos;
+		} else {
+			this->lowest = std::min(this->lowest,   zpos);
+			this->highest = std::max(this->highest, zpos);
+		}
+	}
 };
 
 /** Mouse mode displaying a tile cursor of some size at the ground. */
