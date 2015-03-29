@@ -59,8 +59,10 @@ public:
 
 /** Data of a tile. */
 struct TileData {
-	int8 height;  ///< Height of the cursor (equal to ground height, except at steep slopes). Negative value means 'unknown'.
-	bool enabled; ///< Whether the tile should have a cursor displayed.
+	int8 cursor_height;  ///< Height of the cursor (equal to ground height, except at steep slopes). Negative value means 'unknown'.
+	uint8 lowest;        ///< Lowest voxel that should be rendered.
+	uint8 highest;       ///< Highest voxel that should be rendered.
+	bool cursor_enabled; ///< Whether the tile should have a cursor displayed.
 };
 
 /** Mouse mode displaying a tile cursor of some size at the ground. */

@@ -78,15 +78,17 @@ void CursorMouseMode::InitTileData()
 		for (int y = 0; y < this->area.height; y++) {
 			int ypos = this->area.base.y + y;
 			TileData &td = this->GetTileData(x, y);
-			td.enabled = xpos >= 0 && xpos < _world.GetXSize() && ypos >= 0 && ypos < _world.GetYSize() &&
+			td.cursor_enabled = xpos >= 0 && xpos < _world.GetXSize() && ypos >= 0 && ypos < _world.GetYSize() &&
 					_world.GetTileOwner(xpos, ypos) == OWN_PARK;
-			td.height = -1;
+			td.cursor_height = -1;
+			td.lowest = 1;
+			td.highest = 0;
 		}
 	}
 }
 
 /**
- * Set the position of the cursor area.
+ * Set the position of the cursor area. Clears the cursor and range data.
  * @param xbase X coordinate of the base position.
  * @param ybase Y coordinate of the base position.
  */
@@ -106,9 +108,9 @@ void CursorMouseMode::SetPosition(int xbase, int ybase)
  */
 static inline int GetTopGroundHeight(TileData &td, int xpos, int ypos)
 {
-	if (td.height >= 0) return td.height;
-	td.height = _world.GetTopGroundHeight(xpos, ypos);
-	return td.height;
+	if (td.cursor_height >= 0) return td.cursor_height;
+	td.cursor_height = _world.GetTopGroundHeight(xpos, ypos);
+	return td.cursor_height;
 }
 
 CursorType CursorMouseMode::GetCursor(const XYZPoint16 &voxel_pos)
@@ -120,7 +122,7 @@ CursorType CursorMouseMode::GetCursor(const XYZPoint16 &voxel_pos)
 	if (y < 0 || y >= this->area.height) return CUR_TYPE_INVALID;
 
 	TileData &td = this->GetTileData(x, y);
-	if (td.enabled && GetTopGroundHeight(td, voxel_pos.x, voxel_pos.y) == voxel_pos.z) return this->cur_cursor;
+	if (td.cursor_enabled && GetTopGroundHeight(td, voxel_pos.x, voxel_pos.y) == voxel_pos.z) return this->cur_cursor;
 	return CUR_TYPE_INVALID;
 }
 
@@ -133,8 +135,9 @@ uint32 CursorMouseMode::GetRange(uint xpos, uint ypos)
 	if (y < 0 || y >= this->area.height) return 0;
 
 	TileData &td = this->GetTileData(x, y);
-	if (!td.enabled) return 0;
-	return td.height | (td.height << 16);
+	if (!td.cursor_enabled) return 0;
+
+	return std::min(td.lowest, static_cast<uint8>(td.cursor_height)) | (std::max(td.highest, static_cast<uint8>(td.cursor_height)) << 16);
 }
 
 void CursorMouseMode::MarkDirty()
@@ -144,9 +147,10 @@ void CursorMouseMode::MarkDirty()
 		for (int y = 0; y < this->area.height; y++) {
 			int ypos = this->area.base.y + y;
 			TileData &td = this->GetTileData(x, y);
-			if (!td.enabled) continue;
+			if (!td.cursor_enabled) continue;
 
 			MarkVoxelDirty(XYZPoint16(xpos, ypos, GetTopGroundHeight(td, xpos, ypos)), 0);
+			if (td.lowest <= td.highest) MarkVoxelDirty(XYZPoint16(xpos, ypos, td.lowest), td.highest - td.lowest + 1);
 		}
 	}
 }
