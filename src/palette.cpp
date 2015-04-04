@@ -176,14 +176,20 @@ const uint8 *Recolouring::GetPalette(GradientShift shift) const
 	if (this->shift == shift) return this->colour_map;
 
 	for (int i = 0; i < COL_SERIES_START; i++) this->colour_map[i] = i;
-	for (int i = COL_SERIES_END; i < 256; i++) this->colour_map[i] = i;
-	for (int rng = 0; rng < COL_RANGE_COUNT; rng++) {
-		int base = GetColourRangeBase((ColourRange)rng);
-		int baseval = GetColourRangeBase(this->GetReplacementRange((ColourRange)rng));
-		for (int col = 0; col < COL_SERIES_LENGTH; col++) {
-			this->colour_map[base + col] = baseval + Clamp(col + shift - GS_NORMAL, 0, COL_SERIES_LENGTH - 1);
+	if (shift == GS_DAY || shift == GS_NIGHT) {
+		uint8 val = (shift == GS_DAY) ? COL_RIDE_HIGHLIGHT : COL_RIDE_DARKEN;
+		for (int i = COL_SERIES_START; i < COL_SERIES_END; i++) this->colour_map[i] = val;
+	} else {
+		for (int rng = 0; rng < COL_RANGE_COUNT; rng++) {
+			int base = GetColourRangeBase((ColourRange)rng);
+			int baseval = GetColourRangeBase(this->GetReplacementRange((ColourRange)rng));
+			for (int col = 0; col < COL_SERIES_LENGTH; col++) {
+				this->colour_map[base + col] = baseval + Clamp(col + shift - GS_NORMAL, 0, COL_SERIES_LENGTH - 1);
+			}
 		}
 	}
+	for (int i = COL_SERIES_END; i < 256; i++) this->colour_map[i] = i;
+
 	this->shift = shift;
 	return this->colour_map;
 }
@@ -205,8 +211,8 @@ ColourRange Recolouring::GetReplacementRange(ColourRange src) const
 const uint32 _palette[256] = {
 	MakeRGBA(  0,   0,   0, TRANSPARENT), //  0 COL_BACKGROUND (background behind world display)
 	MakeRGBA(255, 255, 255, OPAQUE), //  1 COL_HIGHLIGHT (full white to highlight window edge)
-	MakeRGBA(  0,   0,   0, OPAQUE), //  2 unused
-	MakeRGBA(  0,   0,   0, OPAQUE), //  3 unused
+	MakeRGBA(255, 255, 255, OPACITY_RIDE_HIGHLIGHT), //  2 COL_RIDE_HIGHLIGHT
+	MakeRGBA(  0,   0,   0, OPACITY_RIDE_HIGHLIGHT), //  3 COL_RIDE_DARKEN
 	MakeRGBA(  0,   0,   0, OPAQUE), //  4 unused
 	MakeRGBA(  0,   0,   0, OPAQUE), //  5 unused
 	MakeRGBA(  0,   0,   0, OPAQUE), //  6 unused

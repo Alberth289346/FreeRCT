@@ -119,15 +119,19 @@ enum GuiTextColours {
 enum PaletteColours {
 	COL_BACKGROUND = 0,     ///< Index of background behind the world display.
 	COL_HIGHLIGHT  = 1,     ///< Index of window highlighting edge colour when (re)opening.
+	COL_RIDE_HIGHLIGHT = 2, ///< Index of ride highlighting colour.
+	COL_RIDE_DARKEN = 3,    ///< Index of ride darken colour.
 
 	COL_SERIES_START = 10,  ///< Index of the first series.
 	COL_SERIES_LENGTH = 12, ///< Number of shades in a single run.
 	COL_SERIES_END = COL_SERIES_START + COL_RANGE_COUNT * COL_SERIES_LENGTH, ///< First colour after the series.
+
+	OPACITY_RIDE_HIGHLIGHT = 150, ///< Opacity of the ride highlight colour.
 };
 
 /** Shifting of the gradient to make the sprite lighter or darker. */
 enum GradientShift {
-	GS_NIGHT,          ///< Shift gradient four steps darker.
+	GS_NIGHT,          ///< Black-ish
 	GS_VERY_DARK,      ///< Shift gradient three steps darker.
 	GS_DARK,           ///< Shift gradient two steps darker.
 	GS_SLIGHTLY_DARK,  ///< Shift gradient one step darker.
@@ -135,7 +139,7 @@ enum GradientShift {
 	GS_SLIGHTLY_LIGHT, ///< Shift gradient one step lighter.
 	GS_LIGHT,          ///< Shift gradient two steps lighter.
 	GS_VERY_LIGHT,     ///< Shift gradient three steps lighter.
-	GS_DAY,            ///< Shift gradient four steps lighter.
+	GS_DAY,            ///< White-ish
 
 	GS_COUNT,          ///< Number of gradient shifts.
 	GS_INVALID = 0xff, ///< Invalid gradient shift.
@@ -151,7 +155,7 @@ typedef uint8 (*ShiftFunc)(uint8); ///< Type of the gradient shift function.
  */
 static inline uint8 ShiftGradientNight(uint8 col)
 {
-	return (col <= 4 * STEP_SIZE) ? 0 : col - 4 * STEP_SIZE;
+	return 0;
 }
 
 /**
@@ -231,7 +235,7 @@ static inline uint8 ShiftGradientVeryLight(uint8 col)
  */
 static inline uint8 ShiftGradientDay(uint8 col)
 {
-	return (col >= 255 - 4 * STEP_SIZE) ? 255: col + 4 * STEP_SIZE;
+	return 255;
 }
 
 /**

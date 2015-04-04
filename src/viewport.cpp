@@ -231,6 +231,7 @@ struct DrawData {
 	SpriteOrder order;           ///< Selection when to draw this sprite (sorts sprites within a voxel). @see SpriteOrder
 	const ImageData *sprite;     ///< Mouse cursor to draw.
 	Point32 base;                ///< Base coordinate of the image, relative to top-left of the window.
+	bool highlight;              ///< Highlight the sprite to make it stand-out.
 	const Recolouring *recolour; ///< Recolouring of the sprite.
 };
 
@@ -722,6 +723,7 @@ static int DrawRide(int32 slice, int zpos, int32 basex, int32 basey, ViewOrienta
 		dd[idx].base.x = basex;
 		dd[idx].base.y = basey;
 		dd[idx].recolour = &ri->recolours;
+		dd[idx].highlight = false;
 		idx++;
 	}
 	return idx;
@@ -758,6 +760,7 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 			dd.base.x = xnorth - this->rect.base.x;
 			dd.base.y = ynorth - this->rect.base.y + yoffset;
 			dd.recolour = nullptr;
+			dd.highlight = false;
 			this->draw_images.insert(dd);
 		}
 		return;
@@ -766,9 +769,13 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 	uint8 platform_shape = PATH_INVALID;
 	SmallRideInstance sri;
 	uint16 instance_data;
+	bool highlight;
 	if (this->selector == nullptr || !this->selector->GetRide(voxel, voxel_pos, &sri, &instance_data)) {
 		sri = voxel->GetInstance();
 		instance_data = voxel->GetInstanceData();
+		highlight = false;
+	} else {
+		highlight = true;
 	}
 	if (sri == SRI_PATH && HasValidPath(instance_data)) { // A path (and not something reserved above it).
 		DrawData dd;
@@ -780,13 +787,17 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 		dd.base.x = xnorth - this->rect.base.x;
 		dd.base.y = ynorth - this->rect.base.y;
 		dd.recolour = nullptr;
+		dd.highlight = highlight;
 		this->draw_images.insert(dd);
 	} else if (sri >= SRI_FULL_RIDES) { // A normal ride.
 		DrawData dd[4];
 		int count = DrawRide(slice, voxel_pos.z,
 				xnorth - this->rect.base.x, ynorth - this->rect.base.y,
 				this->orient, sri, instance_data, dd, &platform_shape);
-		for (int i = 0; i < count; i++) this->draw_images.insert(dd[i]);
+		for (int i = 0; i < count; i++) {
+			dd[i].highlight = highlight;
+			this->draw_images.insert(dd[i]);
+		}
 	}
 
 	/* Foundations. */
@@ -812,6 +823,7 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 				dd.base.x = xnorth - this->rect.base.x;
 				dd.base.y = ynorth - this->rect.base.y;
 				dd.recolour = nullptr;
+				dd.highlight = false;
 				this->draw_images.insert(dd);
 			}
 		}
@@ -826,6 +838,7 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 				dd.base.x = xnorth - this->rect.base.x;
 				dd.base.y = ynorth - this->rect.base.y;
 				dd.recolour = nullptr;
+				dd.highlight = false;
 				this->draw_images.insert(dd);
 			}
 		}
@@ -844,6 +857,7 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 		dd.base.x = xnorth - this->rect.base.x;
 		dd.base.y = ynorth - this->rect.base.y;
 		dd.recolour = nullptr;
+		dd.highlight = false;
 		this->draw_images.insert(dd);
 		switch (slope) {
 			// XXX There are no sprites for partial support of a platform.
@@ -898,6 +912,7 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 			dd.base.x = xnorth - this->rect.base.x;
 			dd.base.y = ynorth - this->rect.base.y + extra_y;
 			dd.recolour = nullptr;
+			dd.highlight = false;
 			this->draw_images.insert(dd);
 		}
 	}
@@ -914,6 +929,7 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 		dd.base.x = xnorth - this->rect.base.x;
 		dd.base.y = ynorth - this->rect.base.y + cursor_yoffset;
 		dd.recolour = nullptr;
+		dd.highlight = false;
 		this->draw_images.insert(dd);
 	}
 
@@ -937,6 +953,7 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 			dd.base.x = xnorth - this->rect.base.x;
 			dd.base.y = ynorth - this->rect.base.y;
 			dd.recolour = nullptr;
+			dd.highlight = false;
 			this->draw_images.insert(dd);
 		}
 
@@ -977,6 +994,7 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 				dd.base.x = xnorth - this->rect.base.x;
 				dd.base.y = ynorth - this->rect.base.y + yoffset;
 				dd.recolour = nullptr;
+				dd.highlight = false;
 				this->draw_images.insert(dd);
 			}
 		}
@@ -996,6 +1014,7 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 			dd.sprite = anim_spr;
 			dd.base.x = this->north_offsets[this->orient].x + xnorth - this->rect.base.x + x_off;
 			dd.base.y = this->north_offsets[this->orient].y + ynorth - this->rect.base.y + y_off;
+			dd.highlight = false;
 			this->draw_images.insert(dd);
 		}
 		vo = vo->next_object;
@@ -1280,7 +1299,7 @@ void Viewport::OnDraw(MouseModeSelector *selector)
 	for (const auto &iter : collector.draw_images) {
 		const DrawData &dd = iter;
 		const Recolouring &rec = (dd.recolour == nullptr) ? recolour : *dd.recolour;
-		_video.BlitImage(dd.base, dd.sprite, rec, gs);
+		_video.BlitImage(dd.base, dd.sprite, rec, dd.highlight ? GS_DAY : gs);
 	}
 
 	_video.SetClippedRectangle(cr);
