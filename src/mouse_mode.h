@@ -321,7 +321,6 @@ public:
 		const VoxelRideData &vrd = td.ride_info[voxel_pos.z - td.lowest];
 		*sri = vrd.sri;
 		*instance_data = vrd.instance_data;
-		printf("getting vrd: sri=%d, instdata=%d, z=%d\n", *sri, *instance_data, voxel_pos.z);
 		return (vrd.sri != SRI_FREE);
 	}
 
