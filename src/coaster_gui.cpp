@@ -98,23 +98,27 @@ void ShowCoasterManagementGui(RideInstance *coaster)
 }
 
 /** Mouse selector for building/selecting new track pieces. */
-class TrackPieceMouseMode : public CursorMouseMode {
+class TrackPieceMouseMode : public RideTileDataMouseMode<RideTileData> {
 public:
-	TrackPieceMouseMode();
+	TrackPieceMouseMode(CoasterInstance *ci);
 	~TrackPieceMouseMode();
 
 	void SetTrackPiece(const XYZPoint16 &pos, ConstTrackPiecePtr &piece);
 
-	ConstTrackPiecePtr piece; ///< Piece to display, or \c nullptr if no piece to display.
-	XYZPoint16 piece_pos;     ///< Position of the track piece (may be different from the base of the cursor area).
+//	bool GetRide(const Voxel *voxel, const XYZPoint16 &voxel_pos, SmallRideInstance *sri, uint16 *instance_data) override;
+	CoasterInstance *ci;            ///< Roller coaster instance to build or edit.
+	PositionedTrackPiece pos_piece; ///< Piece to display, actual piece may be \c nullptr if nothing to display.
 };
 
-TrackPieceMouseMode::TrackPieceMouseMode() : CursorMouseMode()
+TrackPieceMouseMode::TrackPieceMouseMode(CoasterInstance *ci) : RideTileDataMouseMode<RideTileData>()
 {
-	this->piece = nullptr;
+	this->ci = ci;
+	this->pos_piece.piece = nullptr;
 }
 
-TrackPieceMouseMode::~TrackPieceMouseMode() { }
+TrackPieceMouseMode::~TrackPieceMouseMode()
+{
+}
 
 /**
  * Setup the mouse selector for displaying a track piece.
@@ -123,28 +127,23 @@ TrackPieceMouseMode::~TrackPieceMouseMode() { }
  */
 void TrackPieceMouseMode::SetTrackPiece(const XYZPoint16 &pos, ConstTrackPiecePtr &piece)
 {
-	if (this->piece != nullptr) this->MarkDirty(); // Mark current area.
+	if (this->pos_piece.piece != nullptr) this->MarkDirty(); // Mark current area.
 
-	this->piece = piece;
-	if (this->piece != nullptr) {
-		this->piece_pos = pos;
+	this->pos_piece.piece = piece;
+	if (this->pos_piece.piece != nullptr) {
+		this->pos_piece.base_voxel = pos;
 
-		this->area = this->piece->GetArea();
+		this->area = piece->GetArea();
 		this->area.base.x += pos.x; // Set new cursor area, origin may be different from piece_pos due to negative extent of a piece.
 		this->area.base.y += pos.y;
-
-		const int dx = pos.x - this->area.base.x;
-		const int dy = pos.y - this->area.base.y;
 		this->InitTileData();
-		for (const TrackVoxel *tv : this->piece->track_voxels) {
-			int xpos = dx + tv->dxyz.x; // (pos.x + tv->dxyz.x) - this->area.base.x
-			int ypos = dy + tv->dxyz.y; // (pos.y + tv->dxyz.y) - this->area.base.y
-			assert(xpos >= 0 && xpos < this->area.width);
-			assert(ypos >= 0 && ypos < this->area.height);
 
-			TileData &td = GetTileData(xpos, ypos);
-			td.cursor_enabled = true;
-			td.AddVoxel(pos.z + tv->dxyz.z);
+		for (const TrackVoxel *tv : this->pos_piece.piece->track_voxels) this->AddVoxel(this->pos_piece.base_voxel + tv->dxyz);
+
+		this->SetupRideInfoSpace();
+		for (const TrackVoxel *tv : this->pos_piece.piece->track_voxels) {
+			XYZPoint16 p(this->pos_piece.base_voxel + tv->dxyz);
+			this->SetRideData(p, this->ci->GetRideNumber(), this->ci->GetInstanceData(tv));
 		}
 
 		this->MarkDirty();
@@ -317,7 +316,7 @@ private:
  * Constructor of the roller coaster build window. The provided instance may be completely empty.
  * @param ci Coaster instance to build or modify.
  */
-CoasterBuildWindow::CoasterBuildWindow(CoasterInstance *ci) : GuiWindow(WC_COASTER_BUILD, ci->GetIndex())
+CoasterBuildWindow::CoasterBuildWindow(CoasterInstance *ci) : GuiWindow(WC_COASTER_BUILD, ci->GetIndex()), piece_selector(ci)
 {
 	this->ci = ci;
 	this->SetupWidgetTree(_coaster_construction_gui_parts, lengthof(_coaster_construction_gui_parts));
@@ -615,37 +614,43 @@ void CoasterBuildWindow::SetupSelection()
 
 	if (this->sel_piece == nullptr) {
 		this->piece_selector.SetSize(0, 0); // Nothing to display.
-		this->piece_selector.piece = nullptr;
+		this->piece_selector.pos_piece.piece = nullptr;
 		return;
 	}
 
 	if (this->cur_piece == nullptr) { // Display start-piece, moving it around.
-		this->piece_selector.SetTrackPiece(XYZPoint16(0, 0, 0), this->sel_piece);
-// XXX			_coaster_builder.SelectPosition(this->wnumber, this->sel_piece, this->build_direction);
+		/* \todo this->build_direction is the direction of construction. */
+		XYZPoint16 &piece_base = this->piece_selector.pos_piece.base_voxel;
+		if (IsVoxelstackInsideWorld(piece_base.x, piece_base.y)) {
+			uint8 height = _world.GetTopGroundHeight(fdata.voxel_pos.x, fdata.voxel_pos.y);
+			this->piece_selector.SetTrackPiece(XYZPoint16(piece_base.x, piece_base.y, height), this->sel_piece);
+		} else {
+			this->piece_selector.SetTrackPiece(XYZPoint16(0, 0, 0), this->sel_piece);
+		}
 		return;
 	}
 
 	if (this->cur_after) { // Disply next coaster piece.
+		/* \todo TileEdge dir = (TileEdge)(this->cur_piece->piece->exit_connect & 3); is the direction of construction.
+		 * \todo Define this usage of bits in the data format. */
 		this->piece_selector.SetTrackPiece(this->cur_piece->GetEndXYZ(), this->sel_piece);
-//				TileEdge dir = (TileEdge)(this->cur_piece->piece->exit_connect & 3); /// \todo Define this in the data format
-// XXX				_coaster_builder.DisplayPiece(this->wnumber, this->sel_piece, this->cur_piece->GetEndXYZ(), dir);
 		return;
 	}
 
 	// Display previous coaster piece.
 	// XXX Fix me
 	this->piece_selector.SetSize(0, 0); // XXX Fix me
-	this->piece_selector.piece = nullptr;
+	this->piece_selector.pos_piece.piece = nullptr;
 }
 
 void CoasterBuildWindow::SelectorMouseMoveEvent(Viewport *vp, const Point16 &pos)
 {
-	if (this->selector == nullptr || this->piece_selector.piece == nullptr) return; // No active selector.
+	if (this->selector == nullptr || this->piece_selector.pos_piece.piece == nullptr) return; // No active selector.
 	if (this->sel_piece == nullptr || this->cur_piece != nullptr) return; // No piece, or fixed position.
 
 	FinderData fdata(CS_GROUND, FW_TILE);
 	if (vp->ComputeCursorPosition(&fdata) != CS_GROUND) return;
-	XYZPoint16 &piece_base = this->piece_selector.piece_pos;
+	XYZPoint16 &piece_base = this->piece_selector.pos_piece.base_voxel;
 	int dx = fdata.voxel_pos.x - piece_base.x;
 	int dy = fdata.voxel_pos.y - piece_base.y;
 	if (dx == 0 && dy == 0) return;
@@ -653,10 +658,8 @@ void CoasterBuildWindow::SelectorMouseMoveEvent(Viewport *vp, const Point16 &pos
 	this->piece_selector.MarkDirty();
 
 	this->piece_selector.SetPosition(this->piece_selector.area.base.x + dx, this->piece_selector.area.base.y + dy);
-	piece_base.x += dx; // Also update base position of the piece.
-	piece_base.y += dy;
-
-	this->piece_selector.MarkDirty();
+	uint8 height = _world.GetTopGroundHeight(fdata.voxel_pos.x, fdata.voxel_pos.y);
+	this->piece_selector.SetTrackPiece(XYZPoint16(fdata.voxel_pos.x, fdata.voxel_pos.y, height), this->sel_piece);
 }
 
 void CoasterBuildWindow::SelectorMouseButtonEvent(uint8 state)
@@ -680,7 +683,7 @@ int CoasterBuildWindow::BuildTrackPiece()
 	if (ptp_index >= 0) {
 		/* Add the piece to the world. */
 		_additions.Clear();
-		this->ci->PlaceTrackPieceInAdditions(ptp);
+		this->ci->PlaceTrackPieceInAdditions(ptp); // XXX
 		_additions.Commit();
 	}
 	return ptp_index;

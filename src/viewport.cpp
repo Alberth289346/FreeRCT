@@ -729,7 +729,7 @@ static int DrawRide(int32 slice, int zpos, int32 basex, int32 basey, ViewOrienta
 
 /**
  * Add all sprites of the voxel to the set of sprites to draw.
- * @param voxel %Voxel to add, \c nullptr means 'cursor above stack'.
+ * @param voxel %Voxel to add, \c nullptr means 'above or below stack'
  * @param voxel_pos World position.
  * @param xnorth X coordinate of the north corner at the display.
  * @param ynorth y coordinate of the north corner at the display.
@@ -764,8 +764,12 @@ void SpriteCollector::CollectVoxel(const Voxel *voxel, const XYZPoint16 &voxel_p
 	}
 
 	uint8 platform_shape = PATH_INVALID;
-	SmallRideInstance sri = voxel->GetInstance();
-	uint16 instance_data = voxel->GetInstanceData();
+	SmallRideInstance sri;
+	uint16 instance_data;
+	if (this->selector == nullptr || !this->selector->GetRide(voxel, voxel_pos, &sri, &instance_data)) {
+		sri = voxel->GetInstance();
+		instance_data = voxel->GetInstanceData();
+	}
 	if (sri == SRI_PATH && HasValidPath(instance_data)) { // A path (and not something reserved above it).
 		DrawData dd;
 		dd.level = slice;
